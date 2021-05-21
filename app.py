@@ -24,7 +24,6 @@ s = requests.Session()
 s.headers.update({"Authorization": f"Bot {DISCORD_BOT_TOKEN}"})
 
 
-# This is the 2.11 Requests cipher string, containing 3DES.
 CIPHERS = (
     # "TLS_AES_128_GCM_SHA256:"
     # "CHA20_POLY1305_SHA256:"
@@ -197,7 +196,7 @@ def announce():
 
         if is_valid_name(username):
             for wh_dict in WEBHOOKS:
-                if searches >= wh_dict["min_searches"]:
+                if searches >= wh_dict["min_searches"] and wh_dict["validate"](username):
                     try:
                         send_webhook(
                             discord_username,
@@ -210,7 +209,7 @@ def announce():
                     except Exception as e:
                         print(e)
                         return jsonify({'error': 'failed to send webhook'}), 500
-            return jsonify({"message": "announced!"}), 200
+            return "", 204
         else:
             return jsonify({"error": "invalid name"}), 400
     else:

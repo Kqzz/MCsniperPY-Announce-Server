@@ -9,10 +9,12 @@ DISCORD_BOT_TOKEN = ""
 WEBHOOKS = [
     {
         "url": "",
-        "min_searches": 0
+        "min_searches": 0,
+        "validate": lambda username: len(username) == 3
     },
     {
         "url": "",
-        "min_searches": 20
+        "min_searches": 20,
+        "validate": lambda _: True
     }
 ]
