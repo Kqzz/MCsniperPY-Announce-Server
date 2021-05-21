@@ -4,6 +4,9 @@ USER = ""
 PASSWORD = ""
 HOST = "localhost:5432"
 
+# web server
+PORT = 5000
+
 # Discord
 DISCORD_BOT_TOKEN = ""
 WEBHOOKS = [
