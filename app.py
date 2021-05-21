@@ -2,6 +2,9 @@ import psycopg2
 from flask import Flask, jsonify, request
 import requests
 from bs4 import BeautifulSoup
+import time
+from ratelimit import limits
+import ratelimit
 
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.ssl_ import create_urllib3_context
@@ -12,6 +15,7 @@ from config import PASSWORD
 from config import HOST
 from config import DISCORD_BOT_TOKEN
 from config import WEBHOOKS
+from config import PORT
 
 import re
 from datetime import datetime as dt
@@ -25,23 +29,6 @@ s.headers.update({"Authorization": f"Bot {DISCORD_BOT_TOKEN}"})
 
 
 CIPHERS = (
-    # "TLS_AES_128_GCM_SHA256:"
-    # "CHA20_POLY1305_SHA256:"
-    # "HE_ECDSA_WITH_AES_128_GCM_SHA256:"
-    # "_WITH_AES_128_GCM_SHA256:"
-    # "HE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:"
-    # "HE_RSA_WITH_CHACHA20_POLY1305:"
-    # "HE_ECDSA_WITH_AES_256_GCM_SHA384:"
-    # "HE_RSA_WITH_AES_256_GCM_SHA384:"
-    # "HE_ECDSA_WITH_AES_256_CBC_SHA:"
-    # "HE_ECDSA_WITH_AES_128_CBC_SHA:"
-    # "HE_RSA_WITH_AES_128_CBC_SHA:"
-    # "HE_RSA_WITH_AES_256_CBC_SHA:"
-    # "_WITH_AES_128_GCM_SHA256:"
-    # "_WITH_AES_256_GCM_SHA384:"
-    # "_WITH_AES_128_CBC_SHA:"
-    # "_WITH_AES_256_CBC_SHA:"
-    # "_WITH_3DES_EDE_CBC_SHA:"
     'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
     'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
     '!eNULL:!MD5'
@@ -65,6 +52,8 @@ class DESAdapter(HTTPAdapter):
 
 
 def get_searches(username: str) -> int:
+    # This code is bad :(
+    # pls send halp and fix bad code
     # Do the request
     namemc_s = requests.session()
     namemc_s.headers.update({"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:88.0) Gecko/20100101 Firefox/88.0"})
@@ -180,37 +169,59 @@ def is_valid_name(username: str) -> bool:
     return bool(re.match("^[a-zA-Z0-9_-]{3,16}$", username))
 
 
+def did_name_just_drop(username: str) -> bool:
+    try:
+        uuid = requests.get(f"https://api.mojang.com/users/profiles/minecraft/{username}").json()["id"]
+        last_nc = requests.get(f"https://api.mojang.com/user/profiles/{uuid}/names").json()[-1]["changedToAt"] / 1000
+        return time.time() - last_nc < 120
+    except Exception:
+        return False
+
+
 @app.route("/announce", methods=["POST"])
 def announce():
-    authorization = request.headers.get("Authorization")
-    user_data = get_user_data(authorization)
-    discord_id = user_data[0]
-    if user_data is not None:
-        data = discord_user_data(discord_id)
+    @limits(calls=1, period=60)
+    def inner_announce():
+        authorization = request.headers.get("Authorization")
+        user_data = get_user_data(authorization)
+        discord_id = user_data[0]
+        if user_data is not None:
+            data = discord_user_data(discord_id)
 
-        discord_username = data["username"]
-        avatar_url = data["avatar"]
-        username = request.args.get("username")
+            discord_username = data["username"]
+            avatar_url = data["avatar"]
+            username = request.args.get("username")
 
-        searches = get_searches(username)
+            searches = get_searches(username)
 
-        if is_valid_name(username):
-            for wh_dict in WEBHOOKS:
-                if searches >= wh_dict["min_searches"] and wh_dict["validate"](username):
-                    try:
-                        send_webhook(
-                            discord_username,
-                            avatar_url,
-                            discord_id,
-                            username,
-                            searches,
-                            wh_dict["url"]
-                        )
-                    except Exception as e:
-                        print(e)
-                        return jsonify({'error': 'failed to send webhook'}), 500
-            return "", 204
+            if is_valid_name(username) and did_name_just_drop(username):
+                for wh_dict in WEBHOOKS:
+                    if searches >= wh_dict["min_searches"] and wh_dict["validate"](username):
+                        try:
+                            send_webhook(
+                                discord_username,
+                                avatar_url,
+                                discord_id,
+                                username,
+                                searches,
+                                wh_dict["url"]
+                            )
+                        except Exception as e:
+                            print(e)
+                            return jsonify({'error': 'failed to send webhook'}), 500
+                return "", 204
+            else:
+                return jsonify({"error": "invalid name"}), 400
         else:
-            return jsonify({"error": "invalid name"}), 400
-    else:
-        return jsonify({"error": "Provided authorization is invalid"}), 401
+            return jsonify({"error": "Provided authorization is invalid"}), 401
+    try:
+        return inner_announce()
+    except ratelimit.exception.RateLimitException:
+        return jsonify({"error": "Too many requests"}), 429
+    except Exception as e:
+        print(e)
+        return jsonify({"error": "idk. alert staff about this error please. Thanks!"}), 500
+
+
+if __name__ == '__main__':
+    app.run(port=PORT)
