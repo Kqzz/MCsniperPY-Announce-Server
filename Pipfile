@@ -9,6 +9,7 @@ requests = "*"
 bs4 = "*"
 Flask = "*"
 flask-limiter = "*"
+discord = "*"
 
 [dev-packages]
 autopep8 = "*"

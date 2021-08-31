@@ -1,5 +1,6 @@
 from datetime import datetime as dt
 import re
+import discord
 import psycopg2
 from flask import Flask, jsonify, request
 import requests
@@ -8,6 +9,7 @@ import time
 from flask_limiter import Limiter
 import os
 
+from sql import create_connection, execute_sql, query_sql
 
 from config import DATABASE
 from config import USER
@@ -35,55 +37,16 @@ def get_searches(username: str) -> int:
     return 0
 
 
-def create_connection():
-    conn = None
-    try:
-        conn = psycopg2.connect(
-            f"dbname={DATABASE} user={USER} password={PASSWORD} host={HOST}"
-        )
-    except (Exception, psycopg2.DatabaseError) as error:
-        return print(f"Postgres has produced an error (startup) ~ {error}")
-    return conn
-
-
-def execute_sql(command):
-    conn = create_connection()
-
-    cur = conn.cursor()
-    try:
-        cur.execute(command)
-    except (Exception, psycopg2.DatabaseError) as error:
-        return print(f"Postgres has produced an error ({command}) ~ {error}")
-    cur.close()
-    conn.commit()
-
-
-def query_sql(command, one=True):
-    conn = create_connection()
-
-    cur = conn.cursor()
-    try:
-        cur.execute(command)
-    except (Exception, psycopg2.DatabaseError) as error:
-        return print(f"Postgres has produced an error ({command}) ~ {error}")
-    if one:
-        data = cur.fetchone()
-    else:
-        data = cur.fetchall()
-    cur.close()
-    return data
-
-
 # Create DB conn
 create_connection()
 
 
 def get_user_data(authorization: str):
-    return query_sql(f"SELECT discord_id FROM USERS WHERE snipes_auth_code='{authorization}'")
+    return query_sql(f"SELECT discord_id FROM USERS WHERE auth='{authorization}'")
 
 
 def discord_user_data(id: int):
-    r = s.get(f"https://discord.com/api/users/{id}")
+    r = s.get(f"https://discord.com/api/users/{id}", headers={"Authorization": "Bot " + DISCORD_BOT_TOKEN})
     if r.status_code == 200:
         r_json = r.json()
         username = r_json["username"]
@@ -91,6 +54,7 @@ def discord_user_data(id: int):
         avatar = f"https://cdn.discordapp.com/avatars/{id}/{avatar_hash}.png"
         return {"username": username, "avatar": avatar}
     else:
+        print(r.json())
         return None
 
 
@@ -100,7 +64,8 @@ def send_webhook(
     discord_id: int,
     sniped_username: str,
     searches: int,
-    webhook_url: str
+    webhook_url: str,
+    prename: str,
 ):
     data = {
         'content': None,
@@ -114,7 +79,7 @@ def send_webhook(
                     'icon_url': discord_avatar_url
                 },
                 'footer': {
-                    'text': '​',
+                    'text': ('​prename' if prename == 'true' else 'name change') + ' snipe',
                     'icon_url': 'https://i.imgur.com/uHqn3x4.png'
                 },
                 'timestamp': dt.now().isoformat()
@@ -131,13 +96,17 @@ def is_valid_name(username: str) -> bool:
     return bool(re.match("^[a-zA-Z0-9_-]{3,16}$", username))
 
 
-def did_name_just_drop(username: str) -> bool:
-    try:
-        uuid = requests.get(f"https://api.mojang.com/users/profiles/minecraft/{username}").json()["id"]
-        last_nc = requests.get(f"https://api.mojang.com/user/profiles/{uuid}/names").json()[-1]["changedToAt"] / 1000
-        return time.time() - last_nc < 120
-    except Exception:
-        return False
+def did_name_just_drop(username: str, prename: str) -> bool:
+    prename = prename == "true"
+    if not prename:
+        try:
+            uuid = requests.get(f"https://api.mojang.com/users/profiles/minecraft/{username}").json()["id"]
+            last_nc = requests.get(f"https://api.mojang.com/user/profiles/{uuid}/names").json()[-1]["changedToAt"] / 1000
+            return time.time() - last_nc < 120
+        except Exception:
+            return False
+    else:
+        return True
 
 
 @app.route("/announce", methods=["POST"])
@@ -145,17 +114,19 @@ def did_name_just_drop(username: str) -> bool:
 def announce():
     authorization = request.headers.get("Authorization")
     user_data = get_user_data(authorization)
-    discord_id = user_data[0]
     if user_data is not None:
+        discord_id = user_data[0]
+        print(discord_id)
         data = discord_user_data(discord_id)
 
+        print(data)
         discord_username = data["username"]
         avatar_url = data["avatar"]
         username = request.args.get("username")
 
         searches = get_searches(username)
 
-        if is_valid_name(username) and did_name_just_drop(username):
+        if is_valid_name(username) and did_name_just_drop(username, request.args.get("prename", "false")):
             for wh_dict in WEBHOOKS:
                 if searches >= wh_dict["min_searches"] and wh_dict["validate"](username):
                     try:
@@ -165,7 +136,8 @@ def announce():
                             discord_id,
                             username,
                             searches,
-                            wh_dict["url"]
+                            wh_dict["url"],
+                            request.args.get("prename", "false")
                         )
                     except Exception as e:
                         print(e)
@@ -176,6 +148,15 @@ def announce():
     else:
         return jsonify({"error": "Provided authorization is invalid"}), 401
 
+
+execute_sql(
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        discord_id BIGINT NOT NULL,
+        auth VARCHAR(17)
+    )
+    """
+)
 
 if __name__ == '__main__':
     app.run(port=PORT)
