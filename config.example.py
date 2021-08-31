@@ -8,7 +8,6 @@ HOST = "localhost:5432"
 PORT = 5000
 
 # Discord
-DISCORD_BOT_TOKEN = ""
 WEBHOOKS = [
     {
         "url": "",

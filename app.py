@@ -1,26 +1,29 @@
+from datetime import datetime as dt
+import re
 import psycopg2
 from flask import Flask, jsonify, request
 import requests
 from bs4 import BeautifulSoup
 import time
-from ratelimit import limits
-import ratelimit
+from flask_limiter import Limiter
+import os
 
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.ssl_ import create_urllib3_context
 
 from config import DATABASE
 from config import USER
 from config import PASSWORD
 from config import HOST
-from config import DISCORD_BOT_TOKEN
 from config import WEBHOOKS
 from config import PORT
 
-import re
-from datetime import datetime as dt
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+
 
 app = Flask(__name__)
+
+limiter = Limiter(
+    app
+)
 
 # Global DB stuff
 
@@ -28,49 +31,8 @@ s = requests.Session()
 s.headers.update({"Authorization": f"Bot {DISCORD_BOT_TOKEN}"})
 
 
-CIPHERS = (
-    'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
-    'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
-    '!eNULL:!MD5'
-)
-
-
-class DESAdapter(HTTPAdapter):
-    """
-    A TransportAdapter that re-enables 3DES support in Requests.
-    """
-
-    def init_poolmanager(self, *args, **kwargs):
-        context = create_urllib3_context(ciphers=CIPHERS)
-        kwargs['ssl_context'] = context
-        return super(DESAdapter, self).init_poolmanager(*args, **kwargs)
-
-    def proxy_manager_for(self, *args, **kwargs):
-        context = create_urllib3_context(ciphers=CIPHERS)
-        kwargs['ssl_context'] = context
-        return super(DESAdapter, self).proxy_manager_for(*args, **kwargs)
-
-
 def get_searches(username: str) -> int:
-    # This code is bad :(
-    # pls send halp and fix bad code
-    # Do the request
-    namemc_s = requests.session()
-    namemc_s.headers.update({"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:88.0) Gecko/20100101 Firefox/88.0"})
-    namemc_s.mount("https://namemc.com", DESAdapter())
-    r = namemc_s.get(f"https://namemc.com/search?q={username}")
-    if r.status_code < 300:
-        html = r.content
-
-        # Find the searches and remove extra data
-        soup = BeautifulSoup(html, features="lxml")
-        searches_string = soup.find("div", {"class": "tabular"}).text
-        searches_string = searches_string.replace(" / month", "")
-        return int(searches_string)
-    else:
-        print(r.status_code)
-        print(r.content)
-        return 0
+    return 0
 
 
 def create_connection():
@@ -179,48 +141,40 @@ def did_name_just_drop(username: str) -> bool:
 
 
 @app.route("/announce", methods=["POST"])
+@limiter.limit("1/minute", override_defaults=False)
 def announce():
-    @limits(calls=1, period=60)
-    def inner_announce():
-        authorization = request.headers.get("Authorization")
-        user_data = get_user_data(authorization)
-        discord_id = user_data[0]
-        if user_data is not None:
-            data = discord_user_data(discord_id)
+    authorization = request.headers.get("Authorization")
+    user_data = get_user_data(authorization)
+    discord_id = user_data[0]
+    if user_data is not None:
+        data = discord_user_data(discord_id)
 
-            discord_username = data["username"]
-            avatar_url = data["avatar"]
-            username = request.args.get("username")
+        discord_username = data["username"]
+        avatar_url = data["avatar"]
+        username = request.args.get("username")
 
-            searches = get_searches(username)
+        searches = get_searches(username)
 
-            if is_valid_name(username) and did_name_just_drop(username):
-                for wh_dict in WEBHOOKS:
-                    if searches >= wh_dict["min_searches"] and wh_dict["validate"](username):
-                        try:
-                            send_webhook(
-                                discord_username,
-                                avatar_url,
-                                discord_id,
-                                username,
-                                searches,
-                                wh_dict["url"]
-                            )
-                        except Exception as e:
-                            print(e)
-                            return jsonify({'error': 'failed to send webhook'}), 500
-                return "", 204
-            else:
-                return jsonify({"error": "invalid name"}), 400
+        if is_valid_name(username) and did_name_just_drop(username):
+            for wh_dict in WEBHOOKS:
+                if searches >= wh_dict["min_searches"] and wh_dict["validate"](username):
+                    try:
+                        send_webhook(
+                            discord_username,
+                            avatar_url,
+                            discord_id,
+                            username,
+                            searches,
+                            wh_dict["url"]
+                        )
+                    except Exception as e:
+                        print(e)
+                        return jsonify({'error': 'failed to send webhook'}), 500
+            return "", 204
         else:
-            return jsonify({"error": "Provided authorization is invalid"}), 401
-    try:
-        return inner_announce()
-    except ratelimit.exception.RateLimitException:
-        return jsonify({"error": "Too many requests"}), 429
-    except Exception as e:
-        print(e)
-        return jsonify({"error": "idk. alert staff about this error please. Thanks!"}), 500
+            return jsonify({"error": "invalid name"}), 400
+    else:
+        return jsonify({"error": "Provided authorization is invalid"}), 401
 
 
 if __name__ == '__main__':
