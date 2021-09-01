@@ -72,7 +72,7 @@ def send_webhook(
         'embeds': [
             {
                 "description": f"<@{discord_id}> Sniped `{sniped_username}` with `{searches}`"
-                " [searches](https://namemc.com/search?q={sniped_username}) using [MCsniperPY](https://mcsniperpy.com)!",
+                f" [searches](https://namemc.com/search?q={sniped_username}) using [MCsniperPY](https://mcsniperpy.com)!",
                 'color': 3641530,
                 'author': {
                     'name': f"{discord_username} Sniped a name!",
