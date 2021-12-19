@@ -7,12 +7,12 @@ name = "pypi"
 psycopg2 = "*"
 requests = "*"
 bs4 = "*"
-Flask = "*"
-flask-limiter = "*"
+Flask = "2.0.2"
+flask-limiter = "2.0.2"
 discord = "*"
 
 [dev-packages]
 autopep8 = "*"
 
 [requires]
-python_version = "3.9"
+python_version = "3.10"

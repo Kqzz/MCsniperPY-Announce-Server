@@ -1,9 +1,3 @@
-# DB
-DATABASE = "MCsniperPY-DB"
-USER = ""
-PASSWORD = ""
-HOST = "localhost:5432"
-
 # web server
 PORT = 5000
 

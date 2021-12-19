@@ -1,42 +1,37 @@
-import psycopg2
+import sqlite3
 
-from config import DATABASE
-from config import USER
-from config import PASSWORD
-from config import HOST
+conn = None
 
 
 def create_connection():
-    conn = None
     try:
-        conn = psycopg2.connect(
-            f"dbname={DATABASE} user={USER} password={PASSWORD} host={HOST}"
+        conn = sqlite3.connect(
+            "main.db",
+            check_same_thread=False
         )
-    except (Exception, psycopg2.DatabaseError) as error:
-        return print(f"Postgres has produced an error (startup) ~ {error}")
+    except Exception as error:
+        return print(f"Sqlite has produced an error (startup) ~ {error}")
     return conn
 
 
-def execute_sql(command):
-    conn = create_connection()
+def execute_sql(command, *parameters):
 
     cur = conn.cursor()
     try:
-        cur.execute(command)
-    except (Exception, psycopg2.DatabaseError) as error:
-        return print(f"Postgres has produced an error ({command}) ~ {error}")
+        cur.execute(command, parameters)
+    except Exception as error:
+        return print(f"Sqlite has produced an error ({command}) ~ {error}")
     cur.close()
     conn.commit()
 
 
-def query_sql(command, one=True):
-    conn = create_connection()
+def query_sql(command, one=True, *parameters):
 
     cur = conn.cursor()
     try:
-        cur.execute(command)
-    except (Exception, psycopg2.DatabaseError) as error:
-        return print(f"Postgres has produced an error ({command}) ~ {error}")
+        cur.execute(command, parameters)
+    except Exception as error:
+        return print(f"Sqlite has produced an error ({command}) ~ {error}")
     if one:
         data = cur.fetchone()
     else:
